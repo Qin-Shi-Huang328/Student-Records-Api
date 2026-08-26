@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Records — Registrar</title>
+<style>
+  :root {
+    --navy: #1b2a4a;
+    --navy-deep: #101b30;
+    --gold: #b8860b;
+    --gold-light: #d9a441;
+    --paper: #f7f5f0;
+    --paper-line: #e3ded2;
+    --ink: #232323;
+    --ink-soft: #6b6b6b;
+    --danger: #a13d3d;
+    --ok: #2e6b46;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Georgia', 'Times New Roman', serif; background: var(--paper); color: var(--ink); }
+  header {
+    background: var(--navy); color: #fff; padding: 20px 32px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 4px solid var(--gold);
+  }
+  header .brand { display: flex; align-items: baseline; gap: 14px; }
+  header h1 { font-size: 22px; letter-spacing: 0.04em; margin: 0; font-weight: 600; }
+  header .sub { font-size: 12px; color: var(--gold-light); letter-spacing: 0.08em; text-transform: uppercase; }
+  header .status { font-family: 'Courier New', monospace; font-size: 12px; color: #cbd3e0; }
+  header .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-soft); margin-right: 6px; }
+  header .status.online .dot { background: #6fbf8b; }
+  header .status.offline .dot { background: #c1595a; }
+
+  main { max-width: 1040px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  .toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
+  .toolbar input[type="text"] {
+    flex: 1; padding: 11px 14px; border: 1px solid var(--paper-line);
+    background: #fff; font-family: inherit; font-size: 14px; border-radius: 2px;
+  }
+  .toolbar input[type="text"]:focus { outline: 2px solid var(--gold); outline-offset: -1px; }
+  button { font-family: 'Georgia', serif; cursor: pointer; border-radius: 2px; }
+  .btn-primary { background: var(--navy); color: #fff; border: 1px solid var(--navy); padding: 11px 20px; font-size: 14px; letter-spacing: 0.02em; }
+  .btn-primary:hover { background: var(--navy-deep); }
+  .btn-primary.small { padding: 7px 14px; font-size: 13px; }
+  .btn-danger { background: var(--danger); color: #fff; border: 1px solid var(--danger); padding: 11px 20px; font-size: 14px; }
+  .btn-danger:hover { background: #7f2f2f; }
+  .btn-ghost { background: transparent; border: 1px solid var(--paper-line); color: var(--ink); padding: 6px 12px; font-size: 13px; }
+  .btn-ghost:hover { border-color: var(--navy); }
+  .btn-text { background: none; border: none; color: var(--navy); text-decoration: underline; font-size: 13px; padding: 4px 6px; }
+  .btn-text.danger { color: var(--danger); }
+
+  .ledger { background: #fff; border: 1px solid var(--paper-line); }
+  .ledger-head {
+    display: grid; grid-template-columns: 110px 1fr 70px 70px 110px 190px;
+    padding: 12px 16px; background: var(--navy); color: var(--gold-light);
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .row {
+    display: grid; grid-template-columns: 110px 1fr 70px 70px 110px 190px;
+    padding: 13px 16px; border-top: 1px solid var(--paper-line);
+    align-items: center; font-size: 14px;
+  }
+  .row:hover { background: #fbf9f4; }
+  .row .id { font-family: 'Courier New', monospace; color: var(--ink-soft); font-size: 13px; }
+  .badge { display: inline-block; padding: 3px 9px; font-size: 11px; letter-spacing: 0.03em; border-radius: 2px; text-transform: uppercase; }
+  .badge.enrolled { background: #e6f0e9; color: var(--ok); }
+  .badge.not-enrolled { background: #f3e6e6; color: var(--danger); }
+  .badge.irregular { background: #f5edd8; color: #8a6a1f; }
+  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .empty { padding: 60px 20px; text-align: center; color: var(--ink-soft); }
+  .empty .mark { font-size: 34px; color: var(--paper-line); margin-bottom: 10px; }
+
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(16, 27, 48, 0.55);
+    align-items: center; justify-content: center; padding: 20px; z-index: 10;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: #fff; width: 100%; max-width: 480px; border-top: 4px solid var(--gold);
+    padding: 26px 28px 24px; max-height: 90vh; overflow-y: auto;
+  }
+  .modal.wide { max-width: 620px; }
+  .modal.confirm { max-width: 400px; }
+  .modal h2 { margin: 0 0 4px; font-size: 19px; color: var(--navy); }
+  .modal .modal-sub { font-size: 12px; color: var(--ink-soft); margin-bottom: 18px; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--paper-line);
+    font-family: inherit; font-size: 14px; border-radius: 2px;
+  }
+  .field input:disabled { background: #f2f0ea; color: var(--ink-soft); }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field-row.three { grid-template-columns: 1fr 1fr 1fr; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--paper-line); }
+  .modal-actions.split { justify-content: space-between; }
+  .error-msg { background: #f3e6e6; color: var(--danger); padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 2px; display: none; }
+  .error-msg.show { display: block; }
+
+  .grades-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
+  .grades-table th {
+    text-align: left; background: var(--navy); color: var(--gold-light);
+    padding: 8px 10px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .grades-table td { padding: 8px 10px; border-bottom: 1px solid var(--paper-line); }
+  .grades-table .grade-num { font-family: 'Courier New', monospace; }
+  .grades-empty { text-align: center; padding: 24px; color: var(--ink-soft); font-size: 13px; border: 1px dashed var(--paper-line); margin-bottom: 20px; }
+  .grades-add-title { font-size: 13px; font-weight: bold; color: var(--navy); margin-bottom: 10px; letter-spacing: 0.02em; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--navy); color: #fff; padding: 12px 22px; font-size: 14px;
+    border-radius: 2px; border-left: 4px solid var(--gold); opacity: 0;
+    transition: all 0.25s ease; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Registrar — Student Records</h1>
+    <span class="sub">Group 3</span>
+  </div>
+  <div class="status offline" id="apiStatus"><span class="dot"></span>Checking API…</div>
+</header>
+
+<main>
+  <div class="toolbar">
+    <input type="text" id="searchInput" placeholder="Search by name or student number…">
+    <button class="btn-primary" id="addBtn">+ Add Student</button>
+  </div>
+
+  <div class="ledger">
+    <div class="ledger-head">
+      <div>Student No.</div>
+      <div>Name</div>
+      <div>Year</div>
+      <div>Section</div>
+      <div>Status</div>
+      <div>Actions</div>
+    </div>
+    <div id="listBody"></div>
+    <div class="empty" id="emptyState" style="display:none;">
+      <div class="mark">—</div>
+      <div id="emptyText">No students yet. Add your first record above.</div>
+    </div>
+  </div>
+</main>
+
+<!-- Add/Edit Student Modal -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <h2 id="modalTitle">Add Student</h2>
+    <div class="modal-sub" id="modalSub">Fields marked required must be filled before saving.</div>
+    <div class="error-msg" id="formError"></div>
+    <form id="studentForm">
+      <div class="field">
+        <label>Student Number *</label>
+        <input type="text" id="f_student_id" placeholder="e.g. 2023-00456" required>
+      </div>
+      <div class="field">
+        <label>Full Name *</label>
+        <input type="text" id="f_full_name" placeholder="Juan Dela Cruz" required>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Year Level</label>
+          <input type="number" id="f_year_level" min="1" max="6" placeholder="3">
+        </div>
+        <div class="field">
+          <label>Section</label>
+          <input type="text" id="f_section" placeholder="B">
+        </div>
+      </div>
+      <div class="field">
+        <label>Contact Number</label>
+        <input type="text" id="f_contact_number" placeholder="09171234567">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="text" id="f_email" placeholder="student@example.com">
+      </div>
+      <div class="field">
+        <label>Address</label>
+        <input type="text" id="f_address" placeholder="Rizal, Zamboanga del Norte">
+      </div>
+      <div class="field">
+        <label>Enrollment Status</label>
+        <select id="f_enrollment_status">
+          <option value="enrolled">Enrolled</option>
+          <option value="not-enrolled">Not Enrolled</option>
+          <option value="irregular">Irregular</option>
+        </select>
+      </div>
+      <div class="modal-actions split">
+        <button type="button" class="btn-text danger" id="deleteBtn" style="display:none;">Delete this student</button>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="btn-ghost" id="cancelBtn">Cancel</button>
+          <button type="submit" class="btn-primary" id="saveBtn">Save Record</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-backdrop" id="confirmBackdrop">
+  <div class="modal confirm">
+    <h2>Delete this record?</h2>
+    <div class="modal-sub" id="confirmSub">This cannot be undone.</div>
+    <div class="modal-actions">
+      <button type="button" class="btn-ghost" id="confirmCancel">Cancel</button>
+      <button type="button" class="btn-danger" id="confirmDelete">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Grades Modal -->
+<div class="modal-backdrop" id="gradesBackdrop">
+  <div class="modal wide">
+    <h2 id="gradesTitle">Grades</h2>
+    <div class="modal-sub" id="gradesSub">Subjects on file for this student.</div>
+    <div class="error-msg" id="gradesError"></div>
+
+    <table class="grades-table" id="gradesTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Subject</th>
+          <th>Name</th>
+          <th>S.Y.</th>
+          <th>Sem</th>
+          <th>Grade</th>
+          <th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody id="gradesTableBody"></tbody>
+    </table>
+    <div class="grades-empty" id="gradesEmpty">No grades on file yet.</div>
+
+    <div class="grades-add-title">Add a Grade</div>
+    <form id="gradeForm">
+      <div class="field-row three">
+        <div class="field">
+          <label>Subject Code *</label>
+          <input type="text" id="g_subject_code" placeholder="IT301" required>
+        </div>
+        <div class="field">
+          <label>Subject Name *</label>
+          <input type="text" id="g_subject_name" placeholder="Integrative Programming" required>
+        </div>
+        <div class="field">
+          <label>Grade</label>
+          <input type="number" id="g_grade" min="0" max="100" step="0.01" placeholder="88">
+        </div>
+      </div>
+      <div class="field-row three">
+        <div class="field">
+          <label>School Year</label>
+          <input type="text" id="g_school_year" placeholder="2025-2026">
+        </div>
+        <div class="field">
+          <label>Semester</label>
+          <input type="text" id="g_semester" placeholder="1st">
+        </div>
+        <div class="field">
+          <label>Remarks</label>
+          <select id="g_remarks">
+            <option value="">—</option>
+            <option value="passed">Passed</option>
+            <option value="failed">Failed</option>
+            <option value="incomplete">Incomplete</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="gradesCloseBtn">Close</button>
+        <button type="submit" class="btn-primary small" id="gradeSaveBtn">Add Grade</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const API_BASE = 'http://localhost:3000';
+
+  const listBody = document.getElementById('listBody');
+  const emptyState = document.getElementById('emptyState');
+  const emptyText = document.getElementById('emptyText');
+  const searchInput = document.getElementById('searchInput');
+  const apiStatus = document.getElementById('apiStatus');
+  const modalBackdrop = document.getElementById('modalBackdrop');
+  const modalTitle = document.getElementById('modalTitle');
+  const studentForm = document.getElementById('studentForm');
+  const formError = document.getElementById('formError');
+  const toast = document.getElementById('toast');
+  const studentIdField = document.getElementById('f_student_id');
+  const deleteBtn = document.getElementById('deleteBtn');
+  const confirmBackdrop = document.getElementById('confirmBackdrop');
+  const confirmSub = document.getElementById('confirmSub');
+  const confirmDelete = document.getElementById('confirmDelete');
+  const confirmCancel = document.getElementById('confirmCancel');
+
+  const gradesBackdrop = document.getElementById('gradesBackdrop');
+  const gradesTitle = document.getElementById('gradesTitle');
+  const gradesSub = document.getElementById('gradesSub');
+  const gradesTable = document.getElementById('gradesTable');
+  const gradesTableBody = document.getElementById('gradesTableBody');
+  const gradesEmpty = document.getElementById('gradesEmpty');
+  const gradeForm = document.getElementById('gradeForm');
+  const gradesError = document.getElementById('gradesError');
+  const gradesCloseBtn = document.getElementById('gradesCloseBtn');
+
+  let searchTimer = null;
+  let editingId = null;
+  let pendingDeleteId = null;
+  let gradesStudentId = null;
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2200);
+  }
+  function showError(msg) { formError.textContent = msg; formError.classList.add('show'); }
+  function clearError() { formError.textContent = ''; formError.classList.remove('show'); }
+  function showGradesError(msg) { gradesError.textContent = msg; gradesError.classList.add('show'); }
+  function clearGradesError() { gradesError.textContent = ''; gradesError.classList.remove('show'); }
+
+  function badgeClass(status) {
+    if (status === 'enrolled') return 'enrolled';
+    if (status === 'not-enrolled') return 'not-enrolled';
+    return 'irregular';
+  }
+
+  async function checkApi() {
+    try {
+      const res = await fetch(`${API_BASE}/api/db-check`);
+      const data = await res.json();
+      if (data.connected) {
+        apiStatus.classList.remove('offline');
+        apiStatus.classList.add('online');
+        apiStatus.innerHTML = '<span class="dot"></span>API connected';
+      } else { throw new Error('not connected'); }
+    } catch {
+      apiStatus.classList.remove('online');
+      apiStatus.classList.add('offline');
+      apiStatus.innerHTML = '<span class="dot"></span>API offline — is server.js running?';
+    }
+  }
+
+  async function loadStudents(search = '') {
+    try {
+      const url = search
+        ? `${API_BASE}/api/students?search=${encodeURIComponent(search)}`
+        : `${API_BASE}/api/students`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to load');
+      const students = await res.json();
+      renderList(students, search);
+    } catch {
+      listBody.innerHTML = '';
+      emptyState.style.display = 'block';
+      emptyText.textContent = 'Could not reach the API. Make sure node server.js is running.';
+    }
+  }
+
+  function renderList(students, search) {
+    listBody.innerHTML = '';
+    if (students.length === 0) {
+      emptyState.style.display = 'block';
+      emptyText.textContent = search ? `No students match "${search}".` : 'No students yet. Add your first record above.';
+      return;
+    }
+    emptyState.style.display = 'none';
+
+    students.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `
+        <div class="id">${s.student_id}</div>
+        <div>${s.full_name}</div>
+        <div>${s.year_level ?? '—'}</div>
+        <div>${s.section ?? '—'}</div>
+        <div><span class="badge ${badgeClass(s.enrollment_status)}">${s.enrollment_status ?? 'unknown'}</span></div>
+        <div class="row-actions">
+          <button class="btn-text" data-edit="${s.student_id}">Edit</button>
+          <button class="btn-text" data-grades="${s.student_id}" data-name="${s.full_name}">Grades</button>
+          <button class="btn-text danger" data-delete="${s.student_id}">Delete</button>
+        </div>
+      `;
+      listBody.appendChild(row);
+    });
+
+    listBody.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.addEventListener('click', () => editStudent(btn.dataset.edit));
+    });
+    listBody.querySelectorAll('[data-delete]').forEach(btn => {
+      btn.addEventListener('click', () => openDeleteConfirm(btn.dataset.delete));
+    });
+    listBody.querySelectorAll('[data-grades]').forEach(btn => {
+      btn.addEventListener('click', () => openGrades(btn.dataset.grades, btn.dataset.name));
+    });
+  }
+
+  async function editStudent(id) {
+    try {
+      const res = await fetch(`${API_BASE}/api/students/${id}/profile`);
+      if (!res.ok) throw new Error('Not found');
+      const s = await res.json();
+      openModal(s);
+    } catch {
+      showToast('Could not load that student.');
+    }
+  }
+
+  function openModal(student = null) {
+    clearError();
+    studentForm.reset();
+    if (student) {
+      editingId = student.student_id;
+      modalTitle.textContent = 'Edit Student';
+      studentIdField.value = student.student_id;
+      studentIdField.disabled = true;
+      document.getElementById('f_full_name').value = student.full_name || '';
+      document.getElementById('f_year_level').value = student.year_level || '';
+      document.getElementById('f_section').value = student.section || '';
+      document.getElementById('f_contact_number').value = student.contact_number || '';
+      document.getElementById('f_email').value = student.email || '';
+      document.getElementById('f_address').value = student.address || '';
+      document.getElementById('f_enrollment_status').value = student.enrollment_status || 'enrolled';
+      deleteBtn.style.display = 'inline-block';
+    } else {
+      editingId = null;
+      modalTitle.textContent = 'Add Student';
+      studentIdField.disabled = false;
+      deleteBtn.style.display = 'none';
+    }
+    modalBackdrop.classList.add('open');
+  }
+
+  function closeModal() { modalBackdrop.classList.remove('open'); }
+
+  document.getElementById('addBtn').addEventListener('click', () => openModal());
+  document.getElementById('cancelBtn').addEventListener('click', closeModal);
+  modalBackdrop.addEventListener('click', e => { if (e.target === modalBackdrop) closeModal(); });
+
+  studentForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    clearError();
+
+    const student_id = document.getElementById('f_student_id').value.trim();
+    const full_name = document.getElementById('f_full_name').value.trim();
+    if (!student_id || !full_name) {
+      showError('Student Number and Full Name are required.');
+      return;
+    }
+
+    const payload = {
+      full_name,
+      year_level: document.getElementById('f_year_level').value || null,
+      section: document.getElementById('f_section').value.trim() || null,
+      contact_number: document.getElementById('f_contact_number').value.trim() || null,
+      email: document.getElementById('f_email').value.trim() || null,
+      address: document.getElementById('f_address').value.trim() || null,
+      enrollment_status: document.getElementById('f_enrollment_status').value,
+    };
+
+    try {
+      let res, data;
+      if (editingId) {
+        res = await fetch(`${API_BASE}/api/students/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch(`${API_BASE}/api/students`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ student_id, ...payload }),
+        });
+      }
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+      showToast(editingId ? 'Student updated.' : 'Student saved.');
+      closeModal();
+      loadStudents(searchInput.value.trim());
+    } catch (err) {
+      showError(err.message.includes('duplicate') || err.message.includes('unique')
+        ? 'A student with this number already exists.'
+        : err.message);
+    }
+  });
+
+  deleteBtn.addEventListener('click', () => {
+    if (editingId) {
+      closeModal();
+      openDeleteConfirm(editingId);
+    }
+  });
+
+  function openDeleteConfirm(id) {
+    pendingDeleteId = id;
+    confirmSub.textContent = `Delete student ${id}? This cannot be undone.`;
+    confirmBackdrop.classList.add('open');
+  }
+  confirmCancel.addEventListener('click', () => {
+    confirmBackdrop.classList.remove('open');
+    pendingDeleteId = null;
+  });
+  confirmBackdrop.addEventListener('click', e => {
+    if (e.target === confirmBackdrop) { confirmBackdrop.classList.remove('open'); pendingDeleteId = null; }
+  });
+
+  confirmDelete.addEventListener('click', async () => {
+    if (!pendingDeleteId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/students/${pendingDeleteId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      showToast('Student deleted.');
+      confirmBackdrop.classList.remove('open');
+      pendingDeleteId = null;
+      loadStudents(searchInput.value.trim());
+    } catch (err) {
+      confirmBackdrop.classList.remove('open');
+      showToast(err.message.includes('foreign key') || err.message.includes('violates')
+        ? 'Cannot delete — this student has related grades or requests on file.'
+        : `Delete failed: ${err.message}`);
+    }
+  });
+
+  // ---- Grades ----
+  async function openGrades(studentId, studentName) {
+    gradesStudentId = studentId;
+    gradesTitle.textContent = `Grades — ${studentName}`;
+    gradesSub.textContent = `Student No. ${studentId}`;
+    clearGradesError();
+    gradeForm.reset();
+    gradesBackdrop.classList.add('open');
+    await loadGrades();
+  }
+
+  async function loadGrades() {
+    try {
+      const res = await fetch(`${API_BASE}/api/students/${gradesStudentId}/grades`);
+      if (!res.ok) throw new Error('Failed to load grades');
+      const grades = await res.json();
+      renderGrades(grades);
+    } catch {
+      gradesTable.style.display = 'none';
+      gradesEmpty.style.display = 'block';
+      gradesEmpty.textContent = 'Could not load grades.';
+    }
+  }
+
+  function renderGrades(grades) {
+    if (grades.length === 0) {
+      gradesTable.style.display = 'none';
+      gradesEmpty.style.display = 'block';
+      gradesEmpty.textContent = 'No grades on file yet.';
+      return;
+    }
+    gradesEmpty.style.display = 'none';
+    gradesTable.style.display = 'table';
+    gradesTableBody.innerHTML = '';
+    grades.forEach(g => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${g.subject_code}</td>
+        <td>${g.subject_name}</td>
+        <td>${g.school_year ?? '—'}</td>
+        <td>${g.semester ?? '—'}</td>
+        <td class="grade-num">${g.grade ?? '—'}</td>
+        <td>${g.remarks ?? '—'}</td>
+      `;
+      gradesTableBody.appendChild(tr);
+    });
+  }
+
+  gradeForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    clearGradesError();
+
+    const subject_code = document.getElementById('g_subject_code').value.trim();
+    const subject_name = document.getElementById('g_subject_name').value.trim();
+    if (!subject_code || !subject_name) {
+      showGradesError('Subject Code and Subject Name are required.');
+      return;
+    }
+
+    const payload = {
+      subject_code,
+      subject_name,
+      school_year: document.getElementById('g_school_year').value.trim() || null,
+      semester: document.getElementById('g_semester').value.trim() || null,
+      grade: document.getElementById('g_grade').value || null,
+      remarks: document.getElementById('g_remarks').value || null,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/students/${gradesStudentId}/grades`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add grade');
+      showToast('Grade added.');
+      gradeForm.reset();
+      await loadGrades();
+    } catch (err) {
+      showGradesError(err.message);
+    }
+  });
+
+  gradesCloseBtn.addEventListener('click', () => gradesBackdrop.classList.remove('open'));
+  gradesBackdrop.addEventListener('click', e => { if (e.target === gradesBackdrop) gradesBackdrop.classList.remove('open'); });
+
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadStudents(searchInput.value.trim()), 300);
+  });
+
+  checkApi();
+  loadStudents();
+  setInterval(checkApi, 15000);
+</script>
+
+</body>
+</html>
