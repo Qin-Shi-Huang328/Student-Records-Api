@@ -236,6 +236,7 @@
           <th>Sem</th>
           <th>Grade</th>
           <th>Remarks</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="gradesTableBody"></tbody>
@@ -288,7 +289,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-  const API_BASE = 'http://localhost:3000';
+  const API_BASE = 'https://student-records-api-6qqj.onrender.com';
 
   const listBody = document.getElementById('listBody');
   const emptyState = document.getElementById('emptyState');
@@ -579,9 +580,26 @@
         <td>${g.semester ?? '—'}</td>
         <td class="grade-num">${g.grade ?? '—'}</td>
         <td>${g.remarks ?? '—'}</td>
+        <td><button class="btn-text danger" data-delete-grade="${g.grade_id}">Delete</button></td>
       `;
       gradesTableBody.appendChild(tr);
     });
+    gradesTableBody.querySelectorAll('[data-delete-grade]').forEach(btn => {
+      btn.addEventListener('click', () => deleteGrade(btn.dataset.deleteGrade));
+    });
+  }
+
+  async function deleteGrade(gradeId) {
+    if (!confirm('Delete this grade entry?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/grades/${gradeId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      showToast('Grade deleted.');
+      await loadGrades();
+    } catch (err) {
+      showGradesError(err.message);
+    }
   }
 
   gradeForm.addEventListener('submit', async e => {

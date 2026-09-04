@@ -246,6 +246,21 @@ app.put('/api/grades/:gradeId', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Delete a specific grade entry
+app.delete('/api/grades/:gradeId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM grades WHERE grade_id = $1 RETURNING grade_id',
+      [req.params.gradeId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Grade entry not found' });
+    }
+    res.json({ deleted: true, grade_id: result.rows[0].grade_id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Request a document (COR, TOR, COE)
 app.post('/api/students/:id/document-request', async (req, res) => {
