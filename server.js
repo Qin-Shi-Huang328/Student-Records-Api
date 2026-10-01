@@ -14,6 +14,16 @@ const pool = new Pool({
 
 const VALID_STATUSES = ['enrolled', 'not-enrolled', 'irregular'];
 
+// Simple shared-key check for any endpoint that writes data.
+// Web Portal (and your own registrar UI) must send this header.
+function requireApiKey(req, res, next) {
+  const key = req.header('x-api-key');
+  if (!key || key !== process.env.API_KEY) {
+    return res.status(401).json({ error: 'Missing or invalid API key' });
+  }
+  next();
+}
+
 function validateStudentInput(body, isUpdate = false) {
   const errors = [];
 
@@ -76,8 +86,8 @@ app.get('/api/students', async (req, res) => {
   }
 });
 
-// Create a new student
-app.post('/api/students', async (req, res) => {
+// Create a new student — Web Portal uses this for registration (generates student_id itself)
+app.post('/api/students', requireApiKey, async (req, res) => {
   const errors = validateStudentInput(req.body);
   if (errors.length > 0) {
     return res.status(400).json({ error: errors.join('; ') });
@@ -113,7 +123,7 @@ app.get('/api/students/:id/profile', async (req, res) => {
 });
 
 // Update a student's record
-app.put('/api/students/:id', async (req, res) => {
+app.put('/api/students/:id', requireApiKey, async (req, res) => {
   const errors = validateStudentInput(req.body, true);
   if (errors.length > 0) {
     return res.status(400).json({ error: errors.join('; ') });
@@ -138,7 +148,7 @@ app.put('/api/students/:id', async (req, res) => {
 });
 
 // Delete a student's record
-app.delete('/api/students/:id', async (req, res) => {
+app.delete('/api/students/:id', requireApiKey, async (req, res) => {
   try {
     const result = await pool.query(
       'DELETE FROM students WHERE student_id = $1 RETURNING student_id',
@@ -199,7 +209,7 @@ app.get('/api/students/:id/grades', async (req, res) => {
 });
 
 // Add a grade for a student
-app.post('/api/students/:id/grades', async (req, res) => {
+app.post('/api/students/:id/grades', requireApiKey, async (req, res) => {
   const { subject_code, subject_name, school_year, semester, grade, remarks } = req.body;
 
   if (!subject_code || !subject_name) {
@@ -225,7 +235,7 @@ app.post('/api/students/:id/grades', async (req, res) => {
 });
 
 // Update a specific grade entry
-app.put('/api/grades/:gradeId', async (req, res) => {
+app.put('/api/grades/:gradeId', requireApiKey, async (req, res) => {
   const { grade, remarks } = req.body;
   if (grade !== null && grade !== undefined && grade !== '') {
     const g = Number(grade);
@@ -246,8 +256,9 @@ app.put('/api/grades/:gradeId', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 // Delete a specific grade entry
-app.delete('/api/grades/:gradeId', async (req, res) => {
+app.delete('/api/grades/:gradeId', requireApiKey, async (req, res) => {
   try {
     const result = await pool.query(
       'DELETE FROM grades WHERE grade_id = $1 RETURNING grade_id',
@@ -263,7 +274,7 @@ app.delete('/api/grades/:gradeId', async (req, res) => {
 });
 
 // Request a document (COR, TOR, COE)
-app.post('/api/students/:id/document-request', async (req, res) => {
+app.post('/api/students/:id/document-request', requireApiKey, async (req, res) => {
   const { document_type } = req.body;
   try {
     const result = await pool.query(
