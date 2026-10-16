@@ -110,6 +110,17 @@
   .grades-empty { text-align: center; padding: 24px; color: var(--ink-soft); font-size: 13px; border: 1px dashed var(--paper-line); margin-bottom: 20px; }
   .grades-add-title { font-size: 13px; font-weight: bold; color: var(--navy); margin-bottom: 10px; letter-spacing: 0.02em; }
 
+  .history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .history-table th {
+    text-align: left; background: var(--navy); color: var(--gold-light);
+    padding: 8px 10px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .history-table td { padding: 8px 10px; border-bottom: 1px solid var(--paper-line); vertical-align: top; }
+  .history-table .field-name { font-family: 'Courier New', monospace; color: var(--ink-soft); font-size: 12px; }
+  .history-table .changed-by { color: var(--navy); font-weight: bold; }
+  .history-table .changed-at { color: var(--ink-soft); font-size: 12px; white-space: nowrap; }
+  .history-empty { text-align: center; padding: 40px 20px; color: var(--ink-soft); font-size: 13px; border: 1px dashed var(--paper-line); }
+
   .toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: var(--navy); color: #fff; padding: 12px 22px; font-size: 14px;
@@ -152,11 +163,11 @@
   </div>
 </main>
 
-<!-- Add/Edit Student Modal -->
+<!-- Add Student Modal -->
 <div class="modal-backdrop" id="modalBackdrop">
   <div class="modal">
-    <h2 id="modalTitle">Add Student</h2>
-    <div class="modal-sub" id="modalSub">Fields marked required must be filled before saving.</div>
+    <h2>Add Student</h2>
+    <div class="modal-sub">Fields marked required must be filled before saving. Existing students can no longer be edited from here — see their History button for the change log, and note that profile edits now happen through the student's own account (Web Portal).</div>
     <div class="error-msg" id="formError"></div>
     <form id="studentForm">
       <div class="field">
@@ -197,12 +208,9 @@
           <option value="irregular">Irregular</option>
         </select>
       </div>
-      <div class="modal-actions split">
-        <button type="button" class="btn-text danger" id="deleteBtn" style="display:none;">Delete this student</button>
-        <div style="display:flex; gap:10px;">
-          <button type="button" class="btn-ghost" id="cancelBtn">Cancel</button>
-          <button type="submit" class="btn-primary" id="saveBtn">Save Record</button>
-        </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary" id="saveBtn">Save Record</button>
       </div>
     </form>
   </div>
@@ -286,10 +294,39 @@
   </div>
 </div>
 
+<!-- History Modal -->
+<div class="modal-backdrop" id="historyBackdrop">
+  <div class="modal wide">
+    <h2 id="historyTitle">History</h2>
+    <div class="modal-sub" id="historySub">Changes made to this student's profile, most recent first.</div>
+    <div class="error-msg" id="historyError"></div>
+
+    <table class="history-table" id="historyTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Field</th>
+          <th>Old Value</th>
+          <th>New Value</th>
+          <th>Changed By</th>
+        </tr>
+      </thead>
+      <tbody id="historyTableBody"></tbody>
+    </table>
+    <div class="history-empty" id="historyEmpty">No changes on file yet.</div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-ghost" id="historyCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
   const API_BASE = 'https://student-records-api-6qqj.onrender.com';
+  // Must match the API_KEY you set in Render's Environment tab for Student-Records-Api.
+  const API_KEY = 'Kx9pQ2mZrT7vL4wN8sB3eJ6yC1hF5dA0';
 
   const listBody = document.getElementById('listBody');
   const emptyState = document.getElementById('emptyState');
@@ -297,12 +334,9 @@
   const searchInput = document.getElementById('searchInput');
   const apiStatus = document.getElementById('apiStatus');
   const modalBackdrop = document.getElementById('modalBackdrop');
-  const modalTitle = document.getElementById('modalTitle');
   const studentForm = document.getElementById('studentForm');
   const formError = document.getElementById('formError');
   const toast = document.getElementById('toast');
-  const studentIdField = document.getElementById('f_student_id');
-  const deleteBtn = document.getElementById('deleteBtn');
   const confirmBackdrop = document.getElementById('confirmBackdrop');
   const confirmSub = document.getElementById('confirmSub');
   const confirmDelete = document.getElementById('confirmDelete');
@@ -318,8 +352,16 @@
   const gradesError = document.getElementById('gradesError');
   const gradesCloseBtn = document.getElementById('gradesCloseBtn');
 
+  const historyBackdrop = document.getElementById('historyBackdrop');
+  const historyTitle = document.getElementById('historyTitle');
+  const historySub = document.getElementById('historySub');
+  const historyTable = document.getElementById('historyTable');
+  const historyTableBody = document.getElementById('historyTableBody');
+  const historyEmpty = document.getElementById('historyEmpty');
+  const historyError = document.getElementById('historyError');
+  const historyCloseBtn = document.getElementById('historyCloseBtn');
+
   let searchTimer = null;
-  let editingId = null;
   let pendingDeleteId = null;
   let gradesStudentId = null;
 
@@ -332,6 +374,8 @@
   function clearError() { formError.textContent = ''; formError.classList.remove('show'); }
   function showGradesError(msg) { gradesError.textContent = msg; gradesError.classList.add('show'); }
   function clearGradesError() { gradesError.textContent = ''; gradesError.classList.remove('show'); }
+  function showHistoryError(msg) { historyError.textContent = msg; historyError.classList.add('show'); }
+  function clearHistoryError() { historyError.textContent = ''; historyError.classList.remove('show'); }
 
   function badgeClass(status) {
     if (status === 'enrolled') return 'enrolled';
@@ -390,7 +434,7 @@
         <div>${s.section ?? '—'}</div>
         <div><span class="badge ${badgeClass(s.enrollment_status)}">${s.enrollment_status ?? 'unknown'}</span></div>
         <div class="row-actions">
-          <button class="btn-text" data-edit="${s.student_id}">Edit</button>
+          <button class="btn-text" data-history="${s.student_id}" data-name="${s.full_name}">History</button>
           <button class="btn-text" data-grades="${s.student_id}" data-name="${s.full_name}">Grades</button>
           <button class="btn-text danger" data-delete="${s.student_id}">Delete</button>
         </div>
@@ -398,8 +442,8 @@
       listBody.appendChild(row);
     });
 
-    listBody.querySelectorAll('[data-edit]').forEach(btn => {
-      btn.addEventListener('click', () => editStudent(btn.dataset.edit));
+    listBody.querySelectorAll('[data-history]').forEach(btn => {
+      btn.addEventListener('click', () => openHistory(btn.dataset.history, btn.dataset.name));
     });
     listBody.querySelectorAll('[data-delete]').forEach(btn => {
       btn.addEventListener('click', () => openDeleteConfirm(btn.dataset.delete));
@@ -409,39 +453,9 @@
     });
   }
 
-  async function editStudent(id) {
-    try {
-      const res = await fetch(`${API_BASE}/api/students/${id}/profile`);
-      if (!res.ok) throw new Error('Not found');
-      const s = await res.json();
-      openModal(s);
-    } catch {
-      showToast('Could not load that student.');
-    }
-  }
-
-  function openModal(student = null) {
+  function openModal() {
     clearError();
     studentForm.reset();
-    if (student) {
-      editingId = student.student_id;
-      modalTitle.textContent = 'Edit Student';
-      studentIdField.value = student.student_id;
-      studentIdField.disabled = true;
-      document.getElementById('f_full_name').value = student.full_name || '';
-      document.getElementById('f_year_level').value = student.year_level || '';
-      document.getElementById('f_section').value = student.section || '';
-      document.getElementById('f_contact_number').value = student.contact_number || '';
-      document.getElementById('f_email').value = student.email || '';
-      document.getElementById('f_address').value = student.address || '';
-      document.getElementById('f_enrollment_status').value = student.enrollment_status || 'enrolled';
-      deleteBtn.style.display = 'inline-block';
-    } else {
-      editingId = null;
-      modalTitle.textContent = 'Add Student';
-      studentIdField.disabled = false;
-      deleteBtn.style.display = 'none';
-    }
     modalBackdrop.classList.add('open');
   }
 
@@ -463,6 +477,7 @@
     }
 
     const payload = {
+      student_id,
       full_name,
       year_level: document.getElementById('f_year_level').value || null,
       section: document.getElementById('f_section').value.trim() || null,
@@ -473,36 +488,20 @@
     };
 
     try {
-      let res, data;
-      if (editingId) {
-        res = await fetch(`${API_BASE}/api/students/${editingId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        res = await fetch(`${API_BASE}/api/students`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ student_id, ...payload }),
-        });
-      }
-      data = await res.json();
+      const res = await fetch(`${API_BASE}/api/students`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Save failed');
-      showToast(editingId ? 'Student updated.' : 'Student saved.');
+      showToast('Student saved.');
       closeModal();
       loadStudents(searchInput.value.trim());
     } catch (err) {
       showError(err.message.includes('duplicate') || err.message.includes('unique')
         ? 'A student with this number already exists.'
         : err.message);
-    }
-  });
-
-  deleteBtn.addEventListener('click', () => {
-    if (editingId) {
-      closeModal();
-      openDeleteConfirm(editingId);
     }
   });
 
@@ -522,7 +521,10 @@
   confirmDelete.addEventListener('click', async () => {
     if (!pendingDeleteId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/students/${pendingDeleteId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/students/${pendingDeleteId}`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': API_KEY },
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Delete failed');
       showToast('Student deleted.');
@@ -592,7 +594,10 @@
   async function deleteGrade(gradeId) {
     if (!confirm('Delete this grade entry?')) return;
     try {
-      const res = await fetch(`${API_BASE}/api/grades/${gradeId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/grades/${gradeId}`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': API_KEY },
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Delete failed');
       showToast('Grade deleted.');
@@ -625,7 +630,7 @@
     try {
       const res = await fetch(`${API_BASE}/api/students/${gradesStudentId}/grades`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -640,6 +645,52 @@
 
   gradesCloseBtn.addEventListener('click', () => gradesBackdrop.classList.remove('open'));
   gradesBackdrop.addEventListener('click', e => { if (e.target === gradesBackdrop) gradesBackdrop.classList.remove('open'); });
+
+  // ---- History ----
+  async function openHistory(studentId, studentName) {
+    historyTitle.textContent = `History — ${studentName}`;
+    historySub.textContent = `Student No. ${studentId}`;
+    clearHistoryError();
+    historyBackdrop.classList.add('open');
+    historyTable.style.display = 'none';
+    historyEmpty.style.display = 'block';
+    historyEmpty.textContent = 'Loading history...';
+    try {
+      const res = await fetch(`${API_BASE}/api/students/${studentId}/history`);
+      if (!res.ok) throw new Error('Failed to load history');
+      const entries = await res.json();
+      renderHistory(entries);
+    } catch {
+      historyEmpty.textContent = 'Could not load history.';
+    }
+  }
+
+  function renderHistory(entries) {
+    if (entries.length === 0) {
+      historyTable.style.display = 'none';
+      historyEmpty.style.display = 'block';
+      historyEmpty.textContent = 'No changes on file yet.';
+      return;
+    }
+    historyEmpty.style.display = 'none';
+    historyTable.style.display = 'table';
+    historyTableBody.innerHTML = '';
+    entries.forEach(h => {
+      const tr = document.createElement('tr');
+      const when = h.changed_at ? new Date(h.changed_at).toLocaleString() : '—';
+      tr.innerHTML = `
+        <td class="changed-at">${when}</td>
+        <td class="field-name">${h.field_changed ?? '—'}</td>
+        <td>${h.old_value === '' || h.old_value === null ? '—' : h.old_value}</td>
+        <td>${h.new_value === '' || h.new_value === null ? '—' : h.new_value}</td>
+        <td class="changed-by">${h.changed_by ?? 'Unknown'}</td>
+      `;
+      historyTableBody.appendChild(tr);
+    });
+  }
+
+  historyCloseBtn.addEventListener('click', () => historyBackdrop.classList.remove('open'));
+  historyBackdrop.addEventListener('click', e => { if (e.target === historyBackdrop) historyBackdrop.classList.remove('open'); });
 
   searchInput.addEventListener('input', () => {
     clearTimeout(searchTimer);

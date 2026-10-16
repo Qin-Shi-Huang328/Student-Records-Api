@@ -13,9 +13,8 @@ const pool = new Pool({
 });
 
 const VALID_STATUSES = ['enrolled', 'not-enrolled', 'irregular'];
+const TRACKED_FIELDS = ['full_name', 'contact_number', 'email', 'address', 'year_level', 'section', 'enrollment_status'];
 
-// Simple shared-key check for any endpoint that writes data.
-// Web Portal (and your own registrar UI) must send this header.
 function requireApiKey(req, res, next) {
   const key = req.header('x-api-key');
   if (!key || key !== process.env.API_KEY) {
@@ -122,7 +121,8 @@ app.get('/api/students/:id/profile', async (req, res) => {
   }
 });
 
-// Update a student's record
+// Update a student's record — logs every changed field to audit_log.
+// Intended caller: Web Portal (student self-service edit), via x-changed-by header.
 app.put('/api/students/:id', requireApiKey, async (req, res) => {
   const errors = validateStudentInput(req.body, true);
   if (errors.length > 0) {
@@ -130,7 +130,18 @@ app.put('/api/students/:id', requireApiKey, async (req, res) => {
   }
 
   const { full_name, contact_number, email, address, year_level, section, enrollment_status } = req.body;
+  const changedBy = req.header('x-changed-by') || 'Unknown';
+
   try {
+    const beforeResult = await pool.query(
+      `SELECT ${TRACKED_FIELDS.join(', ')} FROM students WHERE student_id = $1`,
+      [req.params.id]
+    );
+    if (beforeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    const before = beforeResult.rows[0];
+
     const result = await pool.query(
       `UPDATE students
        SET full_name = $1, contact_number = $2, email = $3, address = $4,
@@ -138,10 +149,34 @@ app.put('/api/students/:id', requireApiKey, async (req, res) => {
        WHERE student_id = $8 RETURNING *`,
       [full_name, contact_number, email, address, year_level, section, enrollment_status, req.params.id]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Student not found' });
+    const after = result.rows[0];
+
+    for (const field of TRACKED_FIELDS) {
+      const oldVal = before[field] === null || before[field] === undefined ? '' : String(before[field]);
+      const newVal = after[field] === null || after[field] === undefined ? '' : String(after[field]);
+      if (oldVal !== newVal) {
+        await pool.query(
+          `INSERT INTO audit_log (student_id, field_changed, old_value, new_value, changed_by)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [req.params.id, field, oldVal, newVal, changedBy]
+        );
+      }
     }
-    res.json(result.rows[0]);
+
+    res.json(after);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get a student's change history
+app.get('/api/students/:id/history', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT log_id, field_changed, old_value, new_value, changed_by, changed_at FROM audit_log WHERE student_id = $1 ORDER BY changed_at DESC',
+      [req.params.id]
+    );
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
