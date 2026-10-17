@@ -48,6 +48,8 @@ function validateStudentInput(body, isUpdate = false) {
   return errors;
 }
 
+app.use('/api/auth', require('./auth')(pool, requireApiKey));
+
 app.get('/', (req, res) => {
   res.json({ message: 'Student Records API is running' });
 });
