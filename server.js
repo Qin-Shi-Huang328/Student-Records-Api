@@ -341,5 +341,41 @@ app.get('/api/document-requests/:requestId/status', async (req, res) => {
   }
 });
 
+// Get all employees
+app.get('/api/employees', requireApiKey, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT employee_id, full_name, role, password_hash FROM employees ORDER BY full_name');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add a new employee
+app.post('/api/employees', requireApiKey, async (req, res) => {
+  const { employee_id, full_name, role } = req.body;
+  if (!employee_id || !full_name) return res.status(400).json({ error: 'employee_id and full_name are required' });
+  try {
+    const result = await pool.query(
+      'INSERT INTO employees (employee_id, full_name, role) VALUES ($1, $2, $3) RETURNING employee_id, full_name, role',
+      [employee_id, full_name, role || 'staff']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete an employee
+app.delete('/api/employees/:id', requireApiKey, async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM employees WHERE employee_id = $1 RETURNING employee_id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
+    res.json({ deleted: true, employee_id: result.rows[0].employee_id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(Server running on port ${PORT}));
