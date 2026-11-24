@@ -1,9 +1,10 @@
 ﻿require('dotenv').config();
-const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { Pool } = require('pg');
+const buildAuthRouter = require('./auth');
+const { requireRoles, requireSelfOrRoles, actorName } = require('./access');
 
 const app = express();
 app.use(cors());
@@ -17,6 +18,8 @@ const pool = new Pool({
 const VALID_STATUSES = ['enrolled', 'not-enrolled', 'irregular'];
 const TRACKED_FIELDS = ['full_name', 'contact_number', 'email', 'address', 'year_level', 'section', 'enrollment_status'];
 const PROFILE_COLUMNS = 'student_id, full_name, contact_number, email, address, year_level, section, enrollment_status';
+const IT_COLUMNS = 'student_id, full_name';   // IT sees name and ID only
+const EMPLOYEE_ROLES = ['admin', 'records', 'it'];
 
 function serverError(res, where, err) {
   console.error(`[${where}]`, err);
@@ -26,43 +29,6 @@ function serverError(res, where, err) {
 const blankToNull = v => (v === undefined || v === null || String(v).trim() === '' ? null : String(v).trim());
 const toGrade = v => (v === undefined || v === null || v === '' ? null : Number(v));
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
-
-function readClaims(req) {
-  const auth = req.header('authorization') || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature || !process.env.AUTH_SECRET) return null;
-  const expected = crypto.createHmac('sha256', process.env.AUTH_SECRET).update(payload).digest();
-  const supplied = Buffer.from(signature, 'base64url');
-  if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) return null;
-  try {
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return claims.exp > Date.now() ? claims : null;
-  } catch {
-    return null;
-  }
-}
-
-const hasApiKey = req => !!process.env.API_KEY && req.header('x-api-key') === process.env.API_KEY;
-
-function requireStaffOrApiKey(req, res, next) {
-  if (hasApiKey(req)) return next();
-  const claims = readClaims(req);
-  if (claims && claims.type === 'employee') return next();
-  return res.status(401).json({ error: 'A valid API key or employee login is required' });
-}
-
-function requireAdminOrApiKey(req, res, next) {
-  if (hasApiKey(req)) return next();
-  const claims = readClaims(req);
-  if (!claims || claims.type !== 'employee') {
-    return res.status(401).json({ error: 'Admin access is required' });
-  }
-  if (claims.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access is required' });
-  }
-  next();
-}
 
 function validateStudent(data, isUpdate) {
   const errors = [];
@@ -80,13 +46,24 @@ function validateStudent(data, isUpdate) {
   return errors;
 }
 
-app.use('/api/auth', require('./auth')(pool, (req, res, next) => {
-  if (hasApiKey(req)) return next();
-  return res.status(401).json({ error: 'Missing or invalid API key' });
-}));
+// Writes one audit row per changed field. The actor is the signed-in user, never a typed header.
+async function logChange(studentId, field, oldValue, newValue, actor) {
+  await pool.query(
+    `INSERT INTO audit_log (student_id, field_changed, old_value, new_value, changed_by)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [studentId, field, oldValue, newValue, actor]
+  );
+}
+
+// Which columns the caller may see on a student record.
+function profileColumnsFor(caller) {
+  return caller && caller.type === 'employee' && caller.role === 'it' ? IT_COLUMNS : PROFILE_COLUMNS;
+}
+
+app.use('/api/auth', buildAuthRouter(pool));
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Student Records API is running' });
+  res.json({ message: 'Student Records API is running', version: 'step2' });
 });
 
 app.get('/registrar', (req, res) => {
@@ -103,24 +80,24 @@ app.get('/api/db-check', async (req, res) => {
   }
 });
 
-app.get('/api/students', requireStaffOrApiKey, async (req, res) => {
+// List or search. Records and admin see full rows; IT sees names and IDs only.
+app.get('/api/students', requireRoles('admin', 'records', 'it'), async (req, res) => {
   const search = blankToNull(req.query.search);
+  const cols = req.caller.type === 'employee' && req.caller.role === 'it'
+    ? IT_COLUMNS : 'student_id, full_name, year_level, section, enrollment_status';
   try {
     const result = search
       ? await pool.query(
-          `SELECT student_id, full_name, year_level, section, enrollment_status
-           FROM students WHERE full_name ILIKE $1 OR student_id ILIKE $1 ORDER BY full_name`,
+          `SELECT ${cols} FROM students WHERE full_name ILIKE $1 OR student_id ILIKE $1 ORDER BY full_name`,
           [`%${search}%`])
-      : await pool.query(
-          `SELECT student_id, full_name, year_level, section, enrollment_status
-           FROM students ORDER BY full_name`);
+      : await pool.query(`SELECT ${cols} FROM students ORDER BY full_name`);
     res.json(result.rows);
   } catch (err) {
     return serverError(res, 'list students', err);
   }
 });
 
-app.post('/api/students', requireStaffOrApiKey, async (req, res) => {
+app.post('/api/students', requireRoles('admin', 'records'), async (req, res) => {
   const body = req.body || {};
   const errors = validateStudent(body, false);
   if (errors.length) return res.status(400).json({ error: errors.join('; ') });
@@ -139,9 +116,11 @@ app.post('/api/students', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.get('/api/students/:id/profile', requireStaffOrApiKey, async (req, res) => {
+// Student: own record. Records and admin: any. IT: name and ID only.
+app.get('/api/students/:id/profile', requireSelfOrRoles('id', 'admin', 'records', 'it'), async (req, res) => {
   try {
-    const result = await pool.query(`SELECT ${PROFILE_COLUMNS} FROM students WHERE student_id = $1`, [req.params.id]);
+    const cols = profileColumnsFor(req.caller);
+    const result = await pool.query(`SELECT ${cols} FROM students WHERE student_id = $1`, [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Student not found' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -149,9 +128,10 @@ app.get('/api/students/:id/profile', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.put('/api/students/:id', requireStaffOrApiKey, async (req, res) => {
+// Regular fields are edited directly by records staff and admin. Fields not sent keep their value.
+app.put('/api/students/:id', requireRoles('admin', 'records'), async (req, res) => {
   const body = req.body || {};
-  const changedBy = blankToNull(req.header('x-changed-by')) || 'Unknown';
+  const actor = actorName(req);
   try {
     const existing = await pool.query(`SELECT ${TRACKED_FIELDS.join(', ')} FROM students WHERE student_id = $1`, [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'Student not found' });
@@ -176,13 +156,7 @@ app.put('/api/students/:id', requireStaffOrApiKey, async (req, res) => {
     for (const f of TRACKED_FIELDS) {
       const oldVal = before[f] == null ? '' : String(before[f]);
       const newVal = after[f] == null ? '' : String(after[f]);
-      if (oldVal !== newVal) {
-        await pool.query(
-          `INSERT INTO audit_log (student_id, field_changed, old_value, new_value, changed_by)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [req.params.id, f, oldVal, newVal, changedBy]
-        );
-      }
+      if (oldVal !== newVal) await logChange(req.params.id, f, oldVal, newVal, actor);
     }
     res.json(after);
   } catch (err) {
@@ -190,7 +164,8 @@ app.put('/api/students/:id', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.get('/api/students/:id/history', requireStaffOrApiKey, async (req, res) => {
+// Audit history: admin and IT. Students and records staff cannot view it.
+app.get('/api/students/:id/history', requireRoles('admin', 'it'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT log_id, field_changed, old_value, new_value, changed_by, changed_at
@@ -203,17 +178,20 @@ app.get('/api/students/:id/history', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.delete('/api/students/:id', requireStaffOrApiKey, async (req, res) => {
+// Deleting a student is admin only. Audit history is kept.
+app.delete('/api/students/:id', requireRoles('admin'), async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM students WHERE student_id = $1 RETURNING student_id', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Student not found' });
+    await logChange(req.params.id, 'record', 'exists', 'deleted', actorName(req));
     res.json({ deleted: true, student_id: result.rows[0].student_id });
   } catch (err) {
     return serverError(res, 'delete student', err);
   }
 });
 
-app.get('/api/students/:id/verify', requireStaffOrApiKey, async (req, res) => {
+// Used by Finance (service key) and records staff.
+app.get('/api/students/:id/verify', requireRoles('admin', 'records'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT student_id, full_name, enrollment_status, year_level, section FROM students WHERE student_id = $1',
@@ -226,7 +204,7 @@ app.get('/api/students/:id/verify', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.get('/api/students/:id/enrollment-status', requireStaffOrApiKey, async (req, res) => {
+app.get('/api/students/:id/enrollment-status', requireSelfOrRoles('id', 'admin', 'records'), async (req, res) => {
   try {
     const result = await pool.query('SELECT enrollment_status FROM students WHERE student_id = $1', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Student not found' });
@@ -236,7 +214,8 @@ app.get('/api/students/:id/enrollment-status', requireStaffOrApiKey, async (req,
   }
 });
 
-app.get('/api/students/:id/grades', requireStaffOrApiKey, async (req, res) => {
+// Students read their own grades. Records and admin read any.
+app.get('/api/students/:id/grades', requireSelfOrRoles('id', 'admin', 'records'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT grade_id, subject_code, subject_name, school_year, semester, grade, remarks
@@ -249,7 +228,8 @@ app.get('/api/students/:id/grades', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.post('/api/students/:id/grades', requireStaffOrApiKey, async (req, res) => {
+// Records staff enter grades during encoding. Every entry is logged.
+app.post('/api/students/:id/grades', requireRoles('admin', 'records'), async (req, res) => {
   const body = req.body || {};
   if (!blankToNull(body.subject_code) || !blankToNull(body.subject_name)) {
     return res.status(400).json({ error: 'subject_code and subject_name are required' });
@@ -265,18 +245,21 @@ app.post('/api/students/:id/grades', requireStaffOrApiKey, async (req, res) => {
       [req.params.id, blankToNull(body.subject_code), blankToNull(body.subject_name),
         blankToNull(body.school_year), blankToNull(body.semester), grade, blankToNull(body.remarks)]
     );
-    res.status(201).json(result.rows[0]);
+    const row = result.rows[0];
+    await logChange(req.params.id, `grade added: ${row.subject_code}`, '', String(row.grade ?? ''), actorName(req));
+    res.status(201).json(row);
   } catch (err) {
     if (err.code === '23503') return res.status(404).json({ error: 'Student not found' });
     return serverError(res, 'add grade', err);
   }
 });
 
-app.put('/api/grades/:gradeId', requireStaffOrApiKey, async (req, res) => {
+app.put('/api/grades/:gradeId', requireRoles('admin', 'records'), async (req, res) => {
   if (!/^\d+$/.test(req.params.gradeId)) return res.status(400).json({ error: 'Invalid grade ID' });
   const body = req.body || {};
   try {
-    const existing = await pool.query('SELECT grade, remarks FROM grades WHERE grade_id = $1', [req.params.gradeId]);
+    const existing = await pool.query(
+      'SELECT student_id, subject_code, grade, remarks FROM grades WHERE grade_id = $1', [req.params.gradeId]);
     if (!existing.rows.length) return res.status(404).json({ error: 'Grade entry not found' });
     const current = existing.rows[0];
 
@@ -290,24 +273,33 @@ app.put('/api/grades/:gradeId', requireStaffOrApiKey, async (req, res) => {
       'UPDATE grades SET grade = $1, remarks = $2 WHERE grade_id = $3 RETURNING *',
       [grade, remarks, req.params.gradeId]
     );
+    const oldVal = current.grade == null ? '' : String(current.grade);
+    const newVal = result.rows[0].grade == null ? '' : String(result.rows[0].grade);
+    if (oldVal !== newVal) {
+      await logChange(current.student_id, `grade: ${current.subject_code}`, oldVal, newVal, actorName(req));
+    }
     res.json(result.rows[0]);
   } catch (err) {
     return serverError(res, 'update grade', err);
   }
 });
 
-app.delete('/api/grades/:gradeId', requireStaffOrApiKey, async (req, res) => {
+// Deleting a grade is admin only.
+app.delete('/api/grades/:gradeId', requireRoles('admin'), async (req, res) => {
   if (!/^\d+$/.test(req.params.gradeId)) return res.status(400).json({ error: 'Invalid grade ID' });
   try {
-    const result = await pool.query('DELETE FROM grades WHERE grade_id = $1 RETURNING grade_id', [req.params.gradeId]);
+    const result = await pool.query(
+      'DELETE FROM grades WHERE grade_id = $1 RETURNING grade_id, student_id, subject_code, grade', [req.params.gradeId]);
     if (!result.rows.length) return res.status(404).json({ error: 'Grade entry not found' });
-    res.json({ deleted: true, grade_id: result.rows[0].grade_id });
+    const row = result.rows[0];
+    await logChange(row.student_id, `grade removed: ${row.subject_code}`, String(row.grade ?? ''), '', actorName(req));
+    res.json({ deleted: true, grade_id: row.grade_id });
   } catch (err) {
     return serverError(res, 'delete grade', err);
   }
 });
 
-app.post('/api/students/:id/document-request', requireStaffOrApiKey, async (req, res) => {
+app.post('/api/students/:id/document-request', requireRoles('admin', 'records'), async (req, res) => {
   const documentType = blankToNull((req.body || {}).document_type);
   if (!['COR', 'TOR', 'COE'].includes(documentType)) {
     return res.status(400).json({ error: 'document_type must be COR, TOR, or COE' });
@@ -325,21 +317,28 @@ app.post('/api/students/:id/document-request', requireStaffOrApiKey, async (req,
   }
 });
 
-app.get('/api/document-requests/:requestId/status', requireStaffOrApiKey, async (req, res) => {
+// Students may check only their own requests.
+app.get('/api/document-requests/:requestId/status', requireRoles('admin', 'records', 'student'), async (req, res) => {
   if (!/^\d+$/.test(req.params.requestId)) return res.status(400).json({ error: 'Invalid request ID' });
   try {
     const result = await pool.query(
-      'SELECT request_id, document_type, status, requested_at, released_at FROM document_requests WHERE request_id = $1',
+      'SELECT request_id, student_id, document_type, status, requested_at, released_at FROM document_requests WHERE request_id = $1',
       [req.params.requestId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Request not found' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    if (req.caller.type === 'student' && req.caller.sid !== row.student_id) {
+      return res.status(403).json({ error: 'Your account does not have permission for this action' });
+    }
+    const { student_id, ...publicRow } = row;
+    res.json(publicRow);
   } catch (err) {
     return serverError(res, 'document status', err);
   }
 });
 
-app.get('/api/employees', requireStaffOrApiKey, async (req, res) => {
+// Employees: admin and IT can view. Only admin can add or remove.
+app.get('/api/employees', requireRoles('admin', 'it'), async (req, res) => {
   try {
     const result = await pool.query('SELECT employee_id, full_name, role FROM employees ORDER BY full_name');
     res.json(result.rows);
@@ -348,15 +347,19 @@ app.get('/api/employees', requireStaffOrApiKey, async (req, res) => {
   }
 });
 
-app.post('/api/employees', requireAdminOrApiKey, async (req, res) => {
+app.post('/api/employees', requireRoles('admin'), async (req, res) => {
   const body = req.body || {};
   const employeeId = blankToNull(body.employee_id);
   const fullName = blankToNull(body.full_name);
+  const role = blankToNull(body.role) || 'records';
   if (!employeeId || !fullName) return res.status(400).json({ error: 'employee_id and full_name are required' });
+  if (!EMPLOYEE_ROLES.includes(role)) {
+    return res.status(400).json({ error: `role must be one of: ${EMPLOYEE_ROLES.join(', ')}` });
+  }
   try {
     const result = await pool.query(
       'INSERT INTO employees (employee_id, full_name, role) VALUES ($1, $2, $3) RETURNING employee_id, full_name, role',
-      [employeeId, fullName, blankToNull(body.role) || 'staff']
+      [employeeId, fullName, role]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -365,7 +368,7 @@ app.post('/api/employees', requireAdminOrApiKey, async (req, res) => {
   }
 });
 
-app.delete('/api/employees/:id', requireAdminOrApiKey, async (req, res) => {
+app.delete('/api/employees/:id', requireRoles('admin'), async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM employees WHERE employee_id = $1 RETURNING employee_id', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Employee not found' });
