@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -41,6 +41,7 @@
   #registrarLogin button { width: 100%; margin-top: 16px; }
   #registrarLoginError { display: none; margin-top: 12px; color: var(--danger); font-size: 13px; }
   #registrarLoginError.show { display: block; }
+body:not(.auth-required) #registrarLogin { display: none; }
 
   .toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
   .toolbar input[type="text"] {
