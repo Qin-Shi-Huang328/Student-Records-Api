@@ -10,7 +10,6 @@
     --navy-deep: #101b30;
     --gold: #b8860b;
     --gold-light: #d9a441;
-    --paper: #f7f5f0;
     --paper-line: #e3ded2;
     --ink: #232323;
     --ink-soft: #6b6b6b;
@@ -33,6 +32,15 @@
   header .status.offline .dot { background: #c1595a; }
 
   main { max-width: 1040px; margin: 0 auto; padding: 28px 24px 80px; }
+  body.auth-required > header, body.auth-required > main { display: none; }
+  #registrarLogin { max-width: 420px; margin: 10vh auto; padding: 28px; background: #fff; border: 1px solid var(--paper-line); border-top: 4px solid var(--gold); }
+  #registrarLogin h1 { margin: 0 0 6px; color: var(--navy); font-size: 22px; }
+  #registrarLogin p { margin: 0 0 20px; color: var(--ink-soft); font-size: 13px; }
+  #registrarLogin label { display: block; margin: 12px 0 5px; color: var(--ink-soft); font-size: 11px; text-transform: uppercase; }
+  #registrarLogin input { width: 100%; padding: 10px 12px; border: 1px solid var(--paper-line); font: inherit; }
+  #registrarLogin button { width: 100%; margin-top: 16px; }
+  #registrarLoginError { display: none; margin-top: 12px; color: var(--danger); font-size: 13px; }
+  #registrarLoginError.show { display: block; }
 
   .toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
   .toolbar input[type="text"] {
@@ -52,6 +60,8 @@
   .btn-text.danger { color: var(--danger); }
 
   .ledger { background: #fff; border: 1px solid var(--paper-line); }
+    #employeePanel { margin-top: 28px; }
+    #employeePanel h2 { margin: 0 0 12px; font-size: 19px; color: var(--navy); }
   .ledger-head {
     display: grid; grid-template-columns: 110px 1fr 70px 70px 110px 190px;
     padding: 12px 16px; background: var(--navy); color: var(--gold-light);
@@ -130,13 +140,25 @@
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
-<body>
-
+<body class="auth-required">
+<section id="registrarLogin" aria-labelledby="registrarLoginTitle">
+  <h1 id="registrarLoginTitle">Registrar Sign In</h1>
+  <p>Use your employee account to manage student records.</p>
+  <form id="registrarLoginForm">
+    <label for="registrarEmployeeId">Employee ID</label>
+    <input id="registrarEmployeeId" autocomplete="username" required>
+    <label for="registrarPassword">Password</label>
+    <input id="registrarPassword" type="password" autocomplete="current-password" required>
+    <button class="btn-primary" type="submit" id="registrarLoginButton">Sign In</button>
+    <div id="registrarLoginError" role="alert"></div>
+  </form>
+</section>
 <header>
   <div class="brand">
     <h1>Registrar — Student Records</h1>
     <span class="sub">Group 3</span>
   </div>
+  <button type="button" class="btn-ghost" id="registrarSignOut">Sign out</button>
   <div class="status offline" id="apiStatus"><span class="dot"></span>Checking API…</div>
 </header>
 
@@ -144,6 +166,7 @@
   <div class="toolbar">
     <input type="text" id="searchInput" placeholder="Search by name or student number…">
     <button class="btn-primary" id="addBtn">+ Add Student</button>
+    <button class="btn-ghost" id="employeesBtn" type="button">Employees</button>
   </div>
 
   <div class="ledger">
@@ -161,6 +184,15 @@
       <div id="emptyText">No students yet. Add your first record above.</div>
     </div>
   </div>
+
+  <section id="employeePanel" style="display:none;">
+    <h2>Employees</h2>
+    <div id="employeeMessage" class="grades-empty">Loading employees…</div>
+    <table class="grades-table" id="employeeTable" style="display:none;">
+      <thead><tr><th>Employee ID</th><th>Name</th><th>Role</th><th>Action</th></tr></thead>
+      <tbody id="employeeTableBody"></tbody>
+    </table>
+  </section>
 </main>
 
 <!-- Add Student Modal -->
@@ -237,7 +269,6 @@
 
     <table class="grades-table" id="gradesTable" style="display:none;">
       <thead>
-        <tr>
           <th>Subject</th>
           <th>Name</th>
           <th>S.Y.</th>
@@ -324,9 +355,68 @@
 <div class="toast" id="toast"></div>
 
 <script>
-  const API_BASE = 'https://student-records-api-6qqj.onrender.com';
-  // Must match the API_KEY you set in Render's Environment tab for Student-Records-Api.
-  const API_KEY = 'Kx9pQ2mZrT7vL4wN8sB3eJ6yC1hF5dA0';
+  const API_BASE = window.location.origin;
+  const registrarLoginForm = document.getElementById('registrarLoginForm');
+  const registrarLoginError = document.getElementById('registrarLoginError');
+  const registrarLoginButton = document.getElementById('registrarLoginButton');
+  const registrarSignOut = document.getElementById('registrarSignOut');
+  let authToken = sessionStorage.getItem('registrarToken');
+  let employeeRole = sessionStorage.getItem('registrarRole') || '';
+
+  async function apiFetch(url, options = {}) {
+    const headers = { ...(options.headers || {}), Authorization: `Bearer ${authToken}` };
+    const response = await fetch(url, { ...options, headers });
+    if (response.status === 401 && authToken) {
+      authToken = null;
+      employeeRole = '';
+      sessionStorage.removeItem('registrarToken');
+      sessionStorage.removeItem('registrarRole');
+      document.body.classList.add('auth-required');
+      registrarLoginError.textContent = 'Your session expired. Please sign in again.';
+      registrarLoginError.classList.add('show');
+    }
+    return response;
+  }
+
+  registrarLoginForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    registrarLoginError.textContent = '';
+    registrarLoginError.classList.remove('show');
+    registrarLoginButton.disabled = true;
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/staff-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: document.getElementById('registrarEmployeeId').value.trim(),
+          password: document.getElementById('registrarPassword').value,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Sign in failed');
+      authToken = data.token;
+      employeeRole = data.role || '';
+      sessionStorage.setItem('registrarToken', authToken);
+      sessionStorage.setItem('registrarRole', employeeRole);
+      document.getElementById('registrarPassword').value = '';
+      document.body.classList.remove('auth-required');
+      checkApi();
+      loadStudents();
+    } catch (error) {
+      registrarLoginError.textContent = error.message;
+      registrarLoginError.classList.add('show');
+    } finally {
+      registrarLoginButton.disabled = false;
+    }
+  });
+
+  registrarSignOut.addEventListener('click', () => {
+    authToken = null;
+    employeeRole = '';
+    sessionStorage.removeItem('registrarToken');
+    sessionStorage.removeItem('registrarRole');
+    document.body.classList.add('auth-required');
+  });
 
   const listBody = document.getElementById('listBody');
   const emptyState = document.getElementById('emptyState');
@@ -341,6 +431,11 @@
   const confirmSub = document.getElementById('confirmSub');
   const confirmDelete = document.getElementById('confirmDelete');
   const confirmCancel = document.getElementById('confirmCancel');
+  const employeesBtn = document.getElementById('employeesBtn');
+  const employeePanel = document.getElementById('employeePanel');
+  const employeeMessage = document.getElementById('employeeMessage');
+  const employeeTable = document.getElementById('employeeTable');
+  const employeeTableBody = document.getElementById('employeeTableBody');
 
   const gradesBackdrop = document.getElementById('gradesBackdrop');
   const gradesTitle = document.getElementById('gradesTitle');
@@ -404,7 +499,7 @@
       const url = search
         ? `${API_BASE}/api/students?search=${encodeURIComponent(search)}`
         : `${API_BASE}/api/students`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error('Failed to load');
       const students = await res.json();
       renderList(students, search);
@@ -488,9 +583,9 @@
     };
 
     try {
-      const res = await fetch(`${API_BASE}/api/students`, {
+      const res = await apiFetch(`${API_BASE}/api/students`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -521,9 +616,8 @@
   confirmDelete.addEventListener('click', async () => {
     if (!pendingDeleteId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/students/${pendingDeleteId}`, {
+      const res = await apiFetch(`${API_BASE}/api/students/${pendingDeleteId}`, {
         method: 'DELETE',
-        headers: { 'x-api-key': API_KEY },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Delete failed');
@@ -539,6 +633,71 @@
     }
   });
 
+  employeesBtn.addEventListener('click', () => {
+    const shouldOpen = employeePanel.style.display === 'none';
+    employeePanel.style.display = shouldOpen ? 'block' : 'none';
+    if (shouldOpen) loadEmployees();
+  });
+
+  async function loadEmployees() {
+    employeeMessage.textContent = 'Loading employees…';
+    employeeMessage.style.display = 'block';
+    employeeTable.style.display = 'none';
+    try {
+      const res = await apiFetch(`${API_BASE}/api/employees`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load employees');
+
+      employeeTableBody.replaceChildren();
+      if (data.length === 0) {
+        employeeMessage.textContent = 'No employees found.';
+        return;
+      }
+
+      data.forEach(employee => {
+        const row = document.createElement('tr');
+        [employee.employee_id, employee.full_name, employee.role].forEach(value => {
+          const cell = document.createElement('td');
+          cell.textContent = value || '—';
+          row.appendChild(cell);
+        });
+        const actionCell = document.createElement('td');
+        if (employeeRole === 'admin') {
+          const deleteButton = document.createElement('button');
+          deleteButton.type = 'button';
+          deleteButton.className = 'btn-text danger';
+          deleteButton.textContent = 'Delete';
+          deleteButton.addEventListener('click', () => deleteEmployee(employee.employee_id));
+          actionCell.appendChild(deleteButton);
+        } else {
+          actionCell.textContent = 'Admin only';
+        }
+        row.appendChild(actionCell);
+        employeeTableBody.appendChild(row);
+      });
+
+      employeeMessage.style.display = 'none';
+      employeeTable.style.display = 'table';
+    } catch (err) {
+      employeeMessage.textContent = `Could not load employees: ${err.message}`;
+    }
+  }
+
+  async function deleteEmployee(employeeId) {
+    if (!confirm(`Delete employee ${employeeId}? This cannot be undone.`)) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/api/employees/${encodeURIComponent(employeeId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      showToast('Employee deleted.');
+      loadEmployees();
+    } catch (err) {
+      showToast(`Delete failed: ${err.message}`);
+    }
+  }
+
   // ---- Grades ----
   async function openGrades(studentId, studentName) {
     gradesStudentId = studentId;
@@ -552,7 +711,7 @@
 
   async function loadGrades() {
     try {
-      const res = await fetch(`${API_BASE}/api/students/${gradesStudentId}/grades`);
+      const res = await apiFetch(`${API_BASE}/api/students/${gradesStudentId}/grades`);
       if (!res.ok) throw new Error('Failed to load grades');
       const grades = await res.json();
       renderGrades(grades);
@@ -594,9 +753,8 @@
   async function deleteGrade(gradeId) {
     if (!confirm('Delete this grade entry?')) return;
     try {
-      const res = await fetch(`${API_BASE}/api/grades/${gradeId}`, {
+      const res = await apiFetch(`${API_BASE}/api/grades/${gradeId}`, {
         method: 'DELETE',
-        headers: { 'x-api-key': API_KEY },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Delete failed');
@@ -628,9 +786,9 @@
     };
 
     try {
-      const res = await fetch(`${API_BASE}/api/students/${gradesStudentId}/grades`, {
+      const res = await apiFetch(`${API_BASE}/api/students/${gradesStudentId}/grades`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -656,7 +814,7 @@
     historyEmpty.style.display = 'block';
     historyEmpty.textContent = 'Loading history...';
     try {
-      const res = await fetch(`${API_BASE}/api/students/${studentId}/history`);
+      const res = await apiFetch(`${API_BASE}/api/students/${studentId}/history`);
       if (!res.ok) throw new Error('Failed to load history');
       const entries = await res.json();
       renderHistory(entries);
@@ -697,8 +855,11 @@
     searchTimer = setTimeout(() => loadStudents(searchInput.value.trim()), 300);
   });
 
-  checkApi();
-  loadStudents();
+  if (authToken) {
+    document.body.classList.remove('auth-required');
+    checkApi();
+    loadStudents();
+  }
   setInterval(checkApi, 15000);
 </script>
 
