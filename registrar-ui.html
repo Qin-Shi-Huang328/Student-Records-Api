@@ -139,7 +139,11 @@ body:not(.auth-required) #registrarLogin { display: none; }
     transition: all 0.25s ease; pointer-events: none;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-</style>
+  header { display: flex; align-items: center; gap: 14px; }
+  header .brand { margin-right: auto; }
+  header .status { order: 1; }
+  header #registrarSignOut { order: 2; background: transparent; color: #ffffff; border: 1px solid var(--gold-light); padding: 6px 14px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+  header #registrarSignOut:hover { background: var(--gold-light); color: var(--navy); }</style>
 </head>
 <body class="auth-required">
 <section id="registrarLogin" aria-labelledby="registrarLoginTitle">
