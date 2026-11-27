@@ -360,7 +360,7 @@ body:not(.auth-required) #registrarLogin { display: none; }
 <div class="toast" id="toast"></div>
 
 <script>
-  const API_BASE = window.location.origin;
+  const API_BASE = (window.location.protocol === 'file:' ? 'https://student-records-api-6qqj.onrender.com' : window.location.origin);
   const registrarLoginForm = document.getElementById('registrarLoginForm');
   const registrarLoginError = document.getElementById('registrarLoginError');
   const registrarLoginButton = document.getElementById('registrarLoginButton');
